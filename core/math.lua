@@ -82,6 +82,8 @@ local mathScriptConversionTable = {
 }
 
 SILE.settings.declare({name = "math.font.family", type = "string", default = "XITS Math"})
+-- Whether to show debug boxes around mboxes
+SILE.settings.declare({name = "math.debug.boxes", type = "string", default = "false"})
 
 local mathCache
 
@@ -102,7 +104,9 @@ local function getMathMetrics(options)
   for k,v in pairs(mathTable.mathConstants) do
     if type(v) == "table" then v = v.value end
     if k:sub(-9) == "ScaleDown" then constants[k] = v / 100
-    else constants[k] = v * options.size / upem end
+    else
+      constants[k] = v * options.size / upem
+    end
   end
   local italicsCorrection = {}
   for k, v in pairs(mathTable.mathItalicsCorrection) do
@@ -195,6 +199,14 @@ local function maxLength(...)
   return result
 end
 
+local function minLength(...)
+  local args = {...}
+  for i, v in ipairs(args) do
+    args[i] = args[i] * (-1)
+  end
+  return -maxLength(args)
+end
+
 local function getNumberFromLength(length, line)
   local number = length.length
   if line.ratio and line.ratio < 0 and length.shrink > 0 then
@@ -275,7 +287,8 @@ local _mbox = _box {
   -- Output the node and all its descendants
   outputTree = function(self, x, y, line)
     self:output(x, y, line)
-    if debug and typeof(self) ~= "Space" then
+    local debug = SILE.settings.get("math.debug.boxes")
+    if debug == "true" and typeof(self) ~= "Space" then
       SILE.outputter.moveTo(getNumberFromLength(x, line), y.length)
       SILE.outputter.debugHbox(
         { height = self.height.length,
@@ -903,7 +916,6 @@ SILE.nodefactory.math = {
 
 SILE.registerCommand("math", function (options, content)
   local mode = (options and options.mode) and options.mode or 'text'
-  debug = options and options.debug
 
   local mbox = ConvertMathML(content, mbox)
 
