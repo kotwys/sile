@@ -83,7 +83,7 @@ local mathScriptConversionTable = {
 
 SILE.settings.declare({name = "math.font.family", type = "string", default = "XITS Math"})
 -- Whether to show debug boxes around mboxes
-SILE.settings.declare({name = "math.debug.boxes", type = "string", default = "false"})
+SILE.settings.declare({name = "math.debug.boxes", type = "boolean", default = false})
 
 local mathCache
 
@@ -288,7 +288,7 @@ local _mbox = _box {
   outputTree = function(self, x, y, line)
     self:output(x, y, line)
     local debug = SILE.settings.get("math.debug.boxes")
-    if debug == "true" and typeof(self) ~= "Space" then
+    if debug and typeof(self) ~= "Space" then
       SILE.outputter.moveTo(getNumberFromLength(x, line), y.length)
       SILE.outputter.debugHbox(
         { height = self.height.length,
