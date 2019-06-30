@@ -2,6 +2,7 @@ local nodefactory = require("core/nodefactory")
 local hb = require("justenoughharfbuzz")
 local ot = require("core/opentype-parser")
 local symbols = require("core/math-symbols")
+require("core/parserbits")
 
 local mathMode = {
   display = 0,
@@ -912,6 +913,123 @@ local function ConvertMathML(content)
   end
 end
 
+-- Grammar to parse sub/superscripts
+local subSupGrammar
+do
+  local WS = SILE.parserBits.whitespace
+  subSupGrammar = {
+    "mathlist",
+    mathlist = lpeg.Ct((lpeg.V"atom" + lpeg.V"sup" + lpeg.V"sub"
+      + lpeg.V"subsup" + lpeg.S("\r\n\f\t "))^0 * (-1)),
+    atom = (lpeg.P(1) - lpeg.S("^_") - WS) / function(a) print("atom "..a); return a end,
+    sup = lpeg.V"atom" * WS * "^" * WS * lpeg.V"sup0"
+      / function(base, sup)
+          print("sup!")
+          return { tag = "msup", base, sup }
+        end,
+    sup0 = lpeg.V"atom" + (lpeg.V"atom" * WS * "^" * WS * lpeg.V"sup0")
+      / function(base,sup)
+          print("sup0!")
+          return { tag = "msup", base, sup }
+        end,
+    sub = lpeg.V"atom" * WS * "_" * WS * lpeg.V"sub0"
+      / function(base, sub)
+          return { tag = "msub", base, sub }
+        end,
+    sub0 = lpeg.V"atom" + (lpeg.V"atom" * WS * "_" * WS * lpeg.V"sub0")
+      / function(base, sub)
+          return { tag = "msub", base, sub }
+        end,
+    subsup = lpeg.V"sup" * WS * "_" * WS * lpeg.V"sub0"
+      / (function(msup, sub)
+          return { tag = "msubsup", msup.base, sub, msup.sup }
+        end)
+      + lpeg.V"sub" * WS * "^" * lpeg.V"sup0"
+      / (function(msub, sup)
+          return { tag = "msubsup", msub.base, msub.sub, sup }
+        end)
+  }
+end
+
+-- Simply transform `^` and `_` into their MathML counterparts.
+-- TODO:  Also, turn `{}` groups into `mrow`s; infer `mi`, `mn` and `mo`.
+local function convertTexlike(content)
+  -- Turn a list of children into a string, where leaves (of type string) are
+  -- substrings, and sub-trees are replaced with the null character '\0'. For
+  -- this reason, check first whether the every substring contains '\0'
+  -- (although it shouldn't).
+  local function childrenToString(tree)
+    local acc = ""
+    local trees = {}
+    for _,c in ipairs(tree) do
+      if type(c) == "string" then
+        print("case 1")
+        print("c = "..c)
+        if(string.find(c, "z")) then
+          SU.error("A substring contains '\\0' (should not happen)")
+        end
+        acc = acc .. c
+      else
+        print("case 2")
+        print("c = "..c)
+        acc = acc .. 'z'
+        table.insert(trees, c)
+      end
+      print("acc = "..acc)
+      print("trees = "..trees)
+    end
+    return acc, trees
+  end
+  -- In the sequence of strings and trees `seq`, replace every `\0` character
+  -- in a string by a tree from `trees`, in the same order.
+  local function putBackChildren(init, seq, trees)
+    local acc = init
+    local currentString, accPos, treesPos = "", 1, 1
+    for _,elt in ipairs(seq) do
+      if type(elt) == "string" then
+        for _,c in utf8.codes(str) do
+          if c == 122 then
+            if currentString ~= "" then
+              acc[accPos] = currentString
+              currentString = ""
+              accPos = accPos + 1
+            end
+            acc[accPos] = trees[treesPos]
+            treesPos = treesPos + 1
+            accPos = accPos + 1
+          else
+            currentString = currentString .. utf8.char(c)
+          end
+        end
+      else
+        -- Just insert the sub-tree
+        acc[accPos] = trees[treesPos]
+        treesPos = treesPos + 1
+        accPos = accPos + 1
+      end
+    end
+    return acc
+  end
+
+  local str,trees = childrenToString(content)
+  for i,t in ipairs(trees) do
+    trees[i] = convertTexlike(trees[i])
+  end
+  print("str = " .. {string.byte(str, 1, #str)})
+
+  -- Parse the subscripts and superscripts in the string, resulting in a
+  -- sequence of characters and sub/superscript trees.
+  local parsed = lpeg.match(subSupGrammar, str)
+  if parsed == nil then
+    SU.error("TeX-like math parse error")
+  end
+  print("parsed = " .. parsed)
+
+  local res = putBackChildren(content, parsed, trees)
+  print("res = "..res)
+  return res
+end
+
 SILE.nodefactory.math = {
   newText = newText,
   newStackbox = newStackbox
@@ -919,8 +1037,18 @@ SILE.nodefactory.math = {
 
 SILE.registerCommand("math", function (options, content)
   local mode = (options and options.mode) and options.mode or 'text'
+  local format = (options and options.type) and options.type or "mathml"
 
-  local mbox = ConvertMathML(content, mbox)
+  local mbox
+  xpcall(function()
+    if format == "mathml" then
+      mbox = ConvertMathML(content, mbox)
+    elseif format == "texlike" then
+      mbox = ConvertMathML(convertTexlike(content))
+    else
+      SU.error("Unknown math format type")
+    end
+  end, function(err) print(err); print(debug.traceback()) end)
 
   if #(mbox.children) == 1 then
     mbox = mbox.children[1]
