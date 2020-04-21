@@ -989,7 +989,7 @@ local function ConvertMathML(content)
     end
     return newFraction({ numerator=children[1], denominator=children[2] })
   else
-    return nil
+    SU.error("Unknown math command " .. content.tag)
   end
 end
 
@@ -998,8 +998,11 @@ local mathGrammar = function(_ENV)
   local _ = WS^0
   local eol = S"\r\n"
   local digit = R("09")
-  local number = C(digit^1)
-  local myID = C(SILE.inputs.TeXlike.identifier + P(1)) / 1
+  local natural = C(digit^1)
+  local pos_natural = C(R("19") * digit^0)
+  local ctrl_word = R("AZ", "az")^1
+  local ctrl_symbol = P(1)
+  local ctrl_sequence_name = C(ctrl_word + ctrl_symbol) / 1
   local comment = (
       P"%" *
       P(1-eol)^0 *
@@ -1022,6 +1025,7 @@ local mathGrammar = function(_ENV)
   local group = P"{" * V"mathlist" * (P"}" + E("`}` expected"))
   local element_no_infix =
     V"mi" + V"mo" + V"mn" +
+    V"def" +
     V"command" +
     group +
     V"atom"
@@ -1031,13 +1035,14 @@ local mathGrammar = function(_ENV)
     V"sup" +
     V"sub" +
     element_no_infix
+  local def_body = (comment + (WS * _) + element + V"argument")^0
 
   START "texlike_math"
   texlike_math = V"mathlist" * EOF"Unexpected character at end of math code"
   mathlist = (comment + (WS * _) + element)^0
   mi = P"\\" * Cg(P"mi", "tag") * P"{" * mathMLID * P"}"
   mo = P"\\" * Cg(P"mo", "tag") * _ * P"{" * mathMLID * P"}"
-  mn = P"\\" * Cg(P"mn", "tag") * _ * P"{" * number * P"}"
+  mn = P"\\" * Cg(P"mn", "tag") * _ * P"{" * mathMLID * P"}"
   supsub = element_no_infix * _ * P"^" * _ * element_no_infix * _ *
     P"_" * _ * element_no_infix
   subsup = element_no_infix * _ * P"_" * _ * element_no_infix * _ *
@@ -1047,11 +1052,16 @@ local mathGrammar = function(_ENV)
   atom = C(utf8code - S"\\{}%^_")
   command = (
       P"\\" *
-      Cg(myID, "tag") *
+      Cg(ctrl_sequence_name, "tag") *
       (
         group
       )^0
     )
+  def = P"\\def" * _ * P"{" *
+    Cg(ctrl_sequence_name, "command-name") * P"}" * _ *
+    --P"[" * Cg(digit^1, "arity") * P"]" * _ *
+    P"{" * def_body * P"}"
+  argument = P"#" * Cg(pos_natural, "index")
 end
 local mathParser = epnf.define(mathGrammar)
 
@@ -1069,12 +1079,32 @@ local function massageMathAst(tree)
   return tree
 end
 
+local commands = {}
+local function registerCommand(name, fun)
+  commands[name] = fun
+end
+
+local function fold(fun, init, table)
+  local acc = init
+  for k,x in pairs(table) do
+    acc = fun(acc, k, x)
+  end
+  return acc
+end
+
 local function compileToMathML(tree)
   print("compileToMathML begin: "..tree)
   if type(tree) == "string" then return tree end
-  for i,child in ipairs(tree) do
-    tree[i] = compileToMathML(tree[i])
-  end
+  tree = fold(function(acc, key, child)
+    if type(key) ~= "number" then
+      acc[key] = child
+      return acc
+    else
+      local comp = compileToMathML(child)
+      if comp then table.insert(acc, comp) end
+    end
+    return acc
+  end, {}, tree)
   if tree.id == "atom" then
     if lpeg.match(lpeg.R("az","AZ"), tree[1]) then
       tree.tag = "mi"
@@ -1094,6 +1124,11 @@ local function compileToMathML(tree)
     local tmp = tree[2]
     tree[2] = tree[3]
     tree[3] = tmp
+  elseif tree.id == "def" then
+    registerCommand(tree["command-name"], function(x) return tree[1] end)
+    return nil
+  elseif tree.id == "command" and commands[tree.tag] then
+    return commands[tree.tag](tree)
   end
   tree.id = nil
   print("compileToMathML end: "..tree)
