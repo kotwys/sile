@@ -998,8 +998,8 @@ local mathGrammar = function(_ENV)
   local _ = WS^0
   local eol = S"\r\n"
   local digit = R("09")
-  local natural = C(digit^1)
-  local pos_natural = C(R("19") * digit^0)
+  local natural = digit^1 / tonumber
+  local pos_natural = R("19") * digit^0 / tonumber
   local ctrl_word = R("AZ", "az")^1
   local ctrl_symbol = P(1)
   local ctrl_sequence_name = C(ctrl_word + ctrl_symbol) / 1
@@ -1028,6 +1028,7 @@ local mathGrammar = function(_ENV)
     V"def" +
     V"command" +
     group +
+    V"argument" +
     V"atom"
   local element =
     V"supsub" +
@@ -1035,7 +1036,6 @@ local mathGrammar = function(_ENV)
     V"sup" +
     V"sub" +
     element_no_infix
-  local def_body = (comment + (WS * _) + element + V"argument")^0
 
   START "texlike_math"
   texlike_math = V"mathlist" * EOF"Unexpected character at end of math code"
@@ -1060,7 +1060,7 @@ local mathGrammar = function(_ENV)
   def = P"\\def" * _ * P"{" *
     Cg(ctrl_sequence_name, "command-name") * P"}" * _ *
     --P"[" * Cg(digit^1, "arity") * P"]" * _ *
-    P"{" * def_body * P"}"
+    P"{" * V"mathlist" * P"}"
   argument = P"#" * Cg(pos_natural, "index")
 end
 local mathParser = epnf.define(mathGrammar)
@@ -1073,7 +1073,9 @@ local function massageMathAst(tree)
   if tree.id == "texlike_math" then
     tree.tag = "math"
   elseif tree.id == "mathlist" then
-    tree.tag = "mrow"
+    -- Turn mathlist into mrow except if it has exactly one child
+    if #tree == 1 then return tree[1]
+    else tree.tag = "mrow" end
   end
 
   return tree
@@ -1092,16 +1094,21 @@ local function fold(fun, init, table)
   return acc
 end
 
-local function compileToMathML(tree)
+local function compileToMathML(arg_env, tree)
   print("compileToMathML begin: "..tree)
   if type(tree) == "string" then return tree end
   tree = fold(function(acc, key, child)
     if type(key) ~= "number" then
       acc[key] = child
       return acc
-    else
-      local comp = compileToMathML(child)
+    -- Compile each children, except if this node is a macro definition (no
+    -- evaluation "under lambda").
+    elseif tree.id ~= "def" then
+      local comp = compileToMathML(arg_env, child)
       if comp then table.insert(acc, comp) end
+    else
+      -- Children of a `def` node should not be evaluated.
+      table.insert(acc, child)
     end
     return acc
   end, {}, tree)
@@ -1125,10 +1132,34 @@ local function compileToMathML(tree)
     tree[2] = tree[3]
     tree[3] = tmp
   elseif tree.id == "def" then
-    registerCommand(tree["command-name"], function(x) return tree[1] end)
+    print("delaying evaluation of " .. tree[1])
+    registerCommand(tree["command-name"], function(application_tree)
+      print("evaluating command ".. tree["command-name"].." with body "..tree[1].." on app. tree "..application_tree)
+      -- Compile every argument
+      local compiled_args = {}
+      for i,arg in pairs(application_tree) do
+        if type(i) == "number" then
+          table.insert(compiled_args, compileToMathML(arg_env, arg))
+        else
+          compiled_args[i] = application_tree[i]
+        end
+      end
+      print("compiling body "..tree[1].." under env: "..compiled_args)
+      return compileToMathML(compiled_args, tree[1])
+    end)
     return nil
   elseif tree.id == "command" and commands[tree.tag] then
     return commands[tree.tag](tree)
+  elseif tree.id == "argument" then
+    print("Encountered arg #"..tree.index..", arg_env = "..arg_env)
+    print("type(tree.index) == "..type(tree.index))
+    if arg_env[tree.index] then
+      print("in if")
+      return arg_env[tree.index]
+    else
+      print("in else")
+      SU.error("Argument #"..tree.index.." has escaped its scope (probably not fully applied command).")
+    end
   end
   tree.id = nil
   print("compileToMathML end: "..tree)
@@ -1183,7 +1214,7 @@ SILE.registerCommand("texmath", function(options, content)
 
   local mbox
   xpcall(function()
-    mbox = ConvertMathML(compileToMathML(convertTexlike(content)))
+    mbox = ConvertMathML(compileToMathML({}, convertTexlike(content)))
   end, function(err) print(err); print(debug.traceback()) end)
 
   handleMath(mbox, mode)
