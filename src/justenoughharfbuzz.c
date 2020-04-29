@@ -307,12 +307,13 @@ int get_glyph_dimensions(lua_State *L) {
 
   double height = extents.y_bearing * point_size / upem;
   double tHeight = extents.height * point_size / upem;
-  double width = extents.width * point_size / upem;
+  //double width = extents.width * point_size / upem;
   /* The PDF model expects us to make positioning adjustments
   after a glyph is painted. For this we need to know the natural
   glyph advance. libtexpdf will use this to compute the adjustment. */
   double glyphAdvance = hb_font_get_glyph_h_advance(hbFont,
     glyphId) * point_size / upem;
+  double width = glyphAdvance;
 
   lua_newtable(L);
   lua_pushstring(L, "glyphAdvance");
