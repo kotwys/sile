@@ -1023,6 +1023,60 @@ local newFraction = function(spec)
   return ret
 end
 
+-- TODO replace with penlight equivalent
+local function mapList(f, l)
+  local ret = {}
+  for i,x in ipairs(l) do
+    ret[i] = f(i, x)
+  end
+  return ret
+end
+
+-- TODO replace with penlight equivalent
+local function foldList(f, init, l)
+  local acc = init
+  for _,x in ipairs(l) do
+    acc = f(acc, x)
+  end
+  return acc
+end
+
+local sum = function(l)
+  return foldList(function(x,y) return x+y end, 0, l)
+end
+
+local _table = _mbox {
+  _type = "table",
+
+  init = function(self)
+    self.nrow = #self.children
+    self.ncols = math.max(table.unpack(mapList(function(i, c)
+      return #c.children end, self.children)))
+  end,
+
+  styleChildren = function(self)
+    if self.mode == display and self.options.displaystyle ~= "false" then
+    end
+  end,
+
+  shape = function(self)
+    -- For each row, find the highest cell and adjust the others
+    -- accordingly.
+    for _, row in ipairs(self.children) do
+    end
+  end,
+
+  output = function(self)
+    self.height = sum(mapList(function(r) return r.height end, self.children))
+  end
+}
+
+local newTable = function(spec)
+  local ret = std.tree.clone(_table(spec))
+  ret:init()
+  return ret
+end
+
 return {
   mathMode = mathMode,
   atomType = atomType,
@@ -1044,4 +1098,5 @@ return {
   newSpace = newSpace,
   newStandardHspace = newStandardHspace,
   newFraction = newFraction,
+  newTable = newTable
 }

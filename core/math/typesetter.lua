@@ -60,6 +60,11 @@ local function ConvertMathML(content)
       ..#children)
     end
     return b.newFraction({ numerator=children[1], denominator=children[2] })
+  elseif content.tag == "mtable" then
+    local children = convertChildren(content)
+    return b.newTable{children = children, options = content.attr}
+  elseif content.tag == "mtr" or content.tag == "mtd" then
+    return b.newStackbox{direction="H", children = convertChildren(content)}
   else
     SU.error("Unknown math command " .. content.tag)
   end
