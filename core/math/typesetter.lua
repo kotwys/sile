@@ -63,7 +63,9 @@ local function ConvertMathML(content)
   elseif content.tag == "mtable" then
     local children = convertChildren(content)
     return b.newTable{children = children, options = content.attr}
-  elseif content.tag == "mtr" or content.tag == "mtd" then
+  elseif content.tag == "mtr" then
+    return b.newMtr{children = convertChildren(content)}
+  elseif content.tag == "mtd" then
     return b.newStackbox{direction="H", children = convertChildren(content)}
   else
     SU.error("Unknown math command " .. content.tag)
