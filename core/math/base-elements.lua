@@ -395,10 +395,6 @@ elements.stackbox = pl.class({
     end
     self.direction = direction
     self.children = children
-    self.anchor = 1 -- The index of the child whose relY will be 0
-    if self.anchor < 1 or self.anchor > #(self.children) then
-      SU.error('Wrong index of the anchor children: '..self.anchor)
-    end
   end,
 
   styleChildren = function(self)
@@ -427,7 +423,6 @@ elements.stackbox = pl.class({
       table.sort(spaceIdx, function(a, b) return a > b end)
       for _, idx in ipairs(spaceIdx) do
         table.insert(self.children, idx, newStandardHspace(self.options.size * self:getScaleDown(), spaces[idx]))
-        if idx <= self.anchor then self.anchor = self.anchor + 1 end
       end
     end
   end,
@@ -441,6 +436,8 @@ elements.stackbox = pl.class({
     -- 1. set self.width to max element width
     -- 2. set self.height
     -- And finally set children's relative coordinates
+    self.height = SILE.length(0)
+    self.depth = SILE.length(0)
     if self.direction == "H" then
       for i,n in ipairs(self.children) do
         n.relY = SILE.length(0)
@@ -469,20 +466,15 @@ elements.stackbox = pl.class({
       for i,n in ipairs(self.children) do
         self.depth = i == 1 and n.depth or self.depth + n.depth
       end
-      for i = self.anchor, #self.children do
+      for i = 1, #self.children do
         local n = self.children[i]
-        if i == self.anchor then
+        if i == 1 then
           self.height = n.height
           self.depth = n.depth
-        elseif i > self.anchor then
+        elseif i > 1 then
           n.relY = self.children[i - 1].relY + self.children[i - 1].depth + n.height
           self.depth = self.depth + n.height + n.depth
         end
-      end
-      for i = self.anchor - 1, 1, -1 do
-        local n = self.children[i]
-        n.relY = self.children[i + 1].relY - self.children[i + 1].height - n.depth
-        self.height  = self.height + n.depth + n.height
       end
     end
   end,
@@ -1082,6 +1074,23 @@ elements.table = pl.class({
   _init = function(self, children, options)
     self.children = children
     self.options = options
+    self.nrows = #self.children
+    self.ncols = math.max(table.unpack(mapList(function(_, row)
+      return #row.children end, self.children)))
+    SU.debug("math", "self.ncols = "..self.ncols)
+    self.rowspacing = self.options.rowspacing and SILE.length(self.options.rowspacing)
+      or SILE.length("10pt")
+    self.columnspacing = self.options.columnspacing and SILE.length(self.options.columnspacing)
+      or SILE.length("6pt")
+    -- Pad rows that do not have enough cells by adding cells to the
+    -- right.
+    for i,row in ipairs(self.children) do
+      for j = 1, (self.ncols - #row.children) do
+        SU.debug("math", "padding i = "..i..", j = "..j)
+        table.insert(row.children, elements.stackbox('H', {}))
+        SU.debug("math", "size "..#row.children)
+      end
+    end
   end,
 
   styleChildren = function(self)
@@ -1097,9 +1106,6 @@ elements.table = pl.class({
   end,
 
   shape = function(self)
-    self.nrows = #self.children
-    self.ncols = math.max(table.unpack(mapList(function(_, c)
-      return #c.children end, self.children)))
     -- Determine the height (resp. depth) of each row, which is the max
     -- height (resp. depth) among its elements. Then we only need to add it to
     -- the table's height and center every cell vertically.
@@ -1114,13 +1120,13 @@ elements.table = pl.class({
     self.vertSize = SILE.length(0)
     for i, row in ipairs(self.children) do
       self.vertSize = self.vertSize + row.height + row.depth +
-        (i == self.nrows and SILE.length(0) or SILE.length("5pt")) -- Spacing
+        (i == self.nrows and SILE.length(0) or self.rowspacing) -- Spacing
     end
     local rowHeightSoFar = SILE.length(0)
     for i, row in ipairs(self.children) do
       row.relY = rowHeightSoFar + row.height - self.vertSize
       rowHeightSoFar = rowHeightSoFar + row.height + row.depth +
-        (i == self.nrows and SILE.length(0) or SILE.length("5pt")) -- Spacing
+        (i == self.nrows and SILE.length(0) or self.rowspacing) -- Spacing
     end
     self.width = SILE.length(0)
     local thisColRelX = SILE.length(0)
@@ -1129,6 +1135,7 @@ elements.table = pl.class({
       -- Determine its width
       local columnWidth = SILE.length(0)
       for j = 1,self.nrows do
+        SU.debug("math", "i = "..i..", j = "..j)
         if self.children[j].children[i].width > columnWidth then
           columnWidth = self.children[j].children[i].width
         end
@@ -1139,7 +1146,7 @@ elements.table = pl.class({
         cell.relX = thisColRelX + (columnWidth - cell.width) / 2
       end
       thisColRelX = thisColRelX + columnWidth +
-        (i == self.ncols and SILE.length(0) or SILE.length("3pt")) -- Spacing
+        (i == self.ncols and SILE.length(0) or self.columnspacing) -- Spacing
     end
     self.width = thisColRelX
 

@@ -110,6 +110,8 @@ SILE.outputters.libtexpdf = {
   end,
 
   _drawString = function(self, str, width, x_offset, y_offset)
+    pdf.colorpush_rgb(0, 0, 0)
+    pdf.colorpop()
     local x, y = self:getCursor()
     pdf.setstring(x+x_offset, y+y_offset, str, string.len(str), self._font, width)
   end,

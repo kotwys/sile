@@ -7,10 +7,10 @@ local mathGrammar = function(_ENV)
   local _ = WS^0
   local eol = S"\r\n"
   local digit = R("09")
-  local natural = digit^1 / tonumber
+  local natural = digit^1 / tostring
   local pos_natural = R("19") * digit^0 / tonumber
   local ctrl_word = R("AZ", "az")^1
-  local ctrl_symbol = P(1) - S"{}"
+  local ctrl_symbol = P(1) - S"{}\\"
   local ctrl_sequence_name = C(ctrl_word + ctrl_symbol) / 1
   local comment = (
       P"%" *
@@ -32,7 +32,7 @@ local mathGrammar = function(_ENV)
     end
     return ret
   end
-  local group = P"{" * V"mathlist" * (P"}" + E("`}` expected"))
+  local group = P"{" * V"mathlist" * P"}"
   local element_no_infix =
     V"def" +
     V"command" +
@@ -56,6 +56,39 @@ local mathGrammar = function(_ENV)
       list *
       P"]"
     )^-1 / function (a) return type(a)=="table" and a or {} end
+  --[[
+  local dim1_arg =
+    Cg(P"{" *
+       V"mathlist" *
+       (P"\\\\" * V"mathlist")^1 *
+       (P"}" + E"`}` expected")
+      ) / function(...)
+        local t = {...}
+        -- Remove the last mathlist if empty. This way, `a \\ b \\` is the same
+        -- as `a \\ b`.
+        if not t[#t][1] then table.remove(t) end
+        return table.unpack(t)
+      end
+  ]]
+
+  local dim2_arg_inner = Ct(V"mathlist" * (P"&" * V"mathlist")^0) /
+    function(t)
+      t.id = "mathlist"
+      return t
+    end
+  local dim2_arg =
+    Cg(P"{" *
+       dim2_arg_inner *
+       (P"\\\\" * dim2_arg_inner)^1 *
+       P"}"
+      ) / function(...)
+        local t = {...}
+        for k,v in pairs(t) do print(k.." -> "..v) end
+        -- Remove the last mathlist if empty. This way, `inner1 \\ inner2 \\` is the same
+        -- as `inner1 \\ inner2`.
+        if not t[#t][1] or not t[#t][1][1] then table.remove(t) end
+        return table.unpack(t)
+      end
 
   START "texlike_math"
   texlike_math = V"mathlist" * EOF"Unexpected character at end of math code"
@@ -66,15 +99,13 @@ local mathGrammar = function(_ENV)
     P"^" * _ * element_no_infix
   sup = element_no_infix * _ * P"^" * _ * element_no_infix
   sub = element_no_infix * _ * P"_" * _ * element_no_infix
-  atom = natural / tostring + C(utf8code - S"\\{}%^_") +
+  atom = natural + C(utf8code - S"\\{}%^_&") +
     (P"\\{" + P"\\}") / function(s) return string.sub(s, -1) end
   command = (
       P"\\" *
       Cg(ctrl_sequence_name, "command") *
       Cg(parameters, "options") *
-      (
-        group
-      )^0
+      (dim2_arg + group^0)
     )
   def = P"\\def" * _ * P"{" *
     Cg(ctrl_sequence_name, "command-name") * P"}" * _ *
