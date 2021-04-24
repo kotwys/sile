@@ -177,6 +177,11 @@ local function getDenominatorMode(mode)
   else return mathMode.scriptScriptCramped end                                                           -- S, SS, S', SS' -> SS'
 end
 
+-- Style transition functions for radicals
+local function getRadicandMode(mode)
+  return mode + 1 - mode % 2 -- C, C' -> C'
+end
+
 local function getRightMostGlyphId(node)
   while node and node:is_a(elements.stackbox) and node.direction == 'H' do
     node = node.children[#(node.children)]
@@ -1017,6 +1022,48 @@ elements.fraction = pl.class({
       scaleWidth(x, line),
       y.length - self.axisHeight - self.ruleThickness / 2,
       scaleWidth(self.width, line), self.ruleThickness)
+  end
+})
+
+elements.radical = pl.class({
+  _base = elements.mbox,
+  _type = "Radical",
+  _init = function(self, base, radical)
+    elements.mbox._init(self)
+    self.base = base
+    self.radical = elements.text('operator', scriptType.upright, luautf8.char(0x0221a))
+    table.insert(self.children, self.radical)
+    if self.base then table.insert(self.children, self.base) end
+    self.atom = atomType.radicalSymbol
+  end,
+  styleChildren = function(self)
+    if not self.base then
+      SU.error("Radicand can't be empty")
+    else
+      self.base.mode = getRadicandMode(self.mode)
+    end
+  end,
+  shape = function(self)
+    local constants = getMathMetrics().constants
+    local scaleDown = self:getScaleDown()
+    self.ruleThickness = constants.radicalRuleThickness * scaleDown
+    if isDisplayMode(self.mode) then
+      self.verticalGap = constants.radicalDisplayStyleVerticalGap * scaleDown
+    else
+      self.verticalGap = constants.radicalVerticalGap * scaleDown
+    end
+
+    self.base.relX = self.radical.width
+    self.base.relY = SILE.length(0)
+    self.width = self.radical.width + self.base.width
+    self.height = self.base.height + self.verticalGap + self.ruleThickness
+    self.depth = self.base.depth
+  end,
+  output = function(self, x, y, line)
+    SILE.outputter:drawRule(
+      scaleWidth(x, line) + self.base.relX,
+      y.length - self.base.height - self.verticalGap - self.ruleThickness,
+      scaleWidth(self.base.width, line), self.ruleThickness)
   end
 })
 
