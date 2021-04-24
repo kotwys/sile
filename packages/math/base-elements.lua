@@ -193,6 +193,12 @@ local function getRightMostGlyphId(node)
   end
 end
 
+-- Select a variant of a stretchy glyph with height more or equal
+-- to `advance`
+local function selectStretchyVariant(glyph, advance)
+  return glyph
+end
+
 local function contains(table, elt)
   for _,x in pairs(table) do
     if x == elt then return true end
@@ -1031,10 +1037,9 @@ elements.radical = pl.class({
   _init = function(self, base, radical)
     elements.mbox._init(self)
     self.base = base
-    self.radical = elements.text('operator', scriptType.upright, luautf8.char(0x0221a))
-    table.insert(self.children, self.radical)
     if self.base then table.insert(self.children, self.base) end
-    self.atom = atomType.radicalSymbol
+    self.radicalSymbol = {}
+    self.atom = atomType.ordinary
   end,
   styleChildren = function(self)
     if not self.base then
@@ -1053,13 +1058,31 @@ elements.radical = pl.class({
       self.verticalGap = constants.radicalVerticalGap * scaleDown
     end
 
-    self.base.relX = self.radical.width
-    self.base.relY = SILE.length(0)
-    self.width = self.radical.width + self.base.width
     self.height = self.base.height + self.verticalGap + self.ruleThickness
     self.depth = self.base.depth
+
+    local radicalShape = SILE.shaper:shapeToken(luautf8.char(0x0221A), self.options)
+    self.stretchyRadical = selectStretchyVariant(radicalShape[1], self.height)
+    local glyphs = {self.stretchyRadical}
+    SILE.shaper:preAddNodes(glyphs, self.radicalSymbol)
+    self.radicalSymbol.items = glyphs
+    self.radicalSymbol.glyphString = {glyphs[1].gid}
+
+    local advance = self.height + self.depth
+    self.sizeFactor = (advance / self.stretchyRadical.height):tonumber()
+
+    self.base.relX = self.stretchyRadical.width * self.sizeFactor
+    self.base.relY = SILE.length(0)
+    self.width = self.base.relX + self.base.width
   end,
   output = function(self, x, y, line)
+    self.options.size = self.options.size * self.sizeFactor
+    SILE.outputter:setCursor(scaleWidth(x, line), y.length)
+    SILE.outputter:setFont(self.options)
+    SILE.outputter:drawHbox(
+      self.radicalSymbol,
+      self.stretchyRadical.width * self.sizeFactor)
+
     SILE.outputter:drawRule(
       scaleWidth(x, line) + self.base.relX,
       y.length - self.base.height - self.verticalGap - self.ruleThickness,
