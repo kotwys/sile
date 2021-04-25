@@ -193,10 +193,47 @@ local function getRightMostGlyphId(node)
   end
 end
 
--- Select a variant of a stretchy glyph with height more or equal
--- to `advance`
-local function selectStretchyVariant(glyph, advance)
-  return glyph
+-- Select a vertical variant of a stretchy glyph with height equal at least
+-- `advance`
+local function selectStretchyVariant(glyph, advance, options)
+  local function toGlyph(variant)
+    local face = SILE.font.cache(options, SILE.shaper.getFace)
+    local glyphv = pl.tablex.deepcopy(glyph)
+    glyphv.gid = variant.variantGlyph
+    local dimen = hb.get_glyph_dimensions(face.data, face.index, options.size, glyphv.gid)
+    for _, f in ipairs({'width', 'glyphAdvance', 'height', 'depth'}) do
+      glyphv[f] = dimen[f]
+    end
+    return glyphv
+  end
+
+  if glyph.height + glyph.depth >= advance then
+    SU.debug('math', 'good glyph: ' .. glyph.height + glyph.depth)
+    return {glyph}
+  end
+
+  local metrics = getMathMetrics()
+  local upem = metrics.unitsPerEm
+  advance = advance * upem / options.size -- to font units
+
+  local constructions = metrics.mathVariants.vertGlyphConstructions[glyph.gid]
+  if not constructions then return {glyph} end
+  local closest
+  local variants = constructions.mathGlyphVariantRecord
+  for _, v in ipairs(variants) do
+    closest = v
+    if v.advanceMeasurement >= advance then
+      SU.debug('math', 'good glyph ' .. v.variantGlyph)
+      return {toGlyph(v)}
+    end
+  end
+
+  local assembly = constructions.glyphAssembly
+  if assembly then
+    -- TODO: do assemblies
+  end
+
+  return {toGlyph(closest)}
 end
 
 local function contains(table, elt)
@@ -1060,32 +1097,34 @@ elements.radical = pl.class({
 
     self.height = self.base.height + self.verticalGap + self.ruleThickness
     self.depth = self.base.depth
+    local advance = self.height + self.depth
 
     local radicalShape = SILE.shaper:shapeToken(luautf8.char(0x0221A), self.options)
-    self.stretchyRadical = selectStretchyVariant(radicalShape[1], self.height)
-    local glyphs = {self.stretchyRadical}
-    SILE.shaper:preAddNodes(glyphs, self.radicalSymbol)
-    self.radicalSymbol.items = glyphs
-    self.radicalSymbol.glyphString = {glyphs[1].gid}
+    self.stretchyRadical = selectStretchyVariant(
+      radicalShape[1], advance:tonumber(), self.options)
+    SILE.shaper:preAddNodes(self.stretchyRadical, self.radicalSymbol)
+    self.radicalSymbol.items = self.stretchyRadical
+    self.radicalSymbol.glyphString = {self.stretchyRadical[1].gid}
+    self.radicalShift = self.height - self.stretchyRadical[1].height
+    if self.stretchyRadical[1].depth - self.radicalShift > 1.5 * self.base.depth then
+      -- Compensate for small bases like \mn{a}
+      self.radicalShift = 0
+    end
 
-    local advance = self.height + self.depth
-    self.sizeFactor = (advance / self.stretchyRadical.height):tonumber()
-
-    self.base.relX = self.stretchyRadical.width * self.sizeFactor
+    self.base.relX = self.stretchyRadical[1].width
     self.base.relY = SILE.length(0)
     self.width = self.base.relX + self.base.width
   end,
   output = function(self, x, y, line)
-    self.options.size = self.options.size * self.sizeFactor
-    SILE.outputter:setCursor(scaleWidth(x, line), y.length)
+    SILE.outputter:setCursor(
+      scaleWidth(x, line),
+      y.length - self.radicalShift)
     SILE.outputter:setFont(self.options)
-    SILE.outputter:drawHbox(
-      self.radicalSymbol,
-      self.stretchyRadical.width * self.sizeFactor)
+    SILE.outputter:drawHbox(self.radicalSymbol, self.stretchyRadical[1].width)
 
     SILE.outputter:drawRule(
       scaleWidth(x, line) + self.base.relX,
-      y.length - self.base.height - self.verticalGap - self.ruleThickness,
+      y.length - self.stretchyRadical[1].height - self.radicalShift,
       scaleWidth(self.base.width, line), self.ruleThickness)
   end
 })
