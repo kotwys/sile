@@ -1071,10 +1071,12 @@ elements.fraction = pl.class({
 elements.radical = pl.class({
   _base = elements.mbox,
   _type = "Radical",
-  _init = function(self, base, radical)
+  _init = function(self, base, index)
     elements.mbox._init(self)
     self.base = base
+    self.index = index
     if self.base then table.insert(self.children, self.base) end
+    if self.index then table.insert(self.children, self.index) end
     self.radicalSymbol = {}
     self.atom = atomType.ordinary
   end,
@@ -1083,6 +1085,9 @@ elements.radical = pl.class({
       SU.error("Radicand can't be empty")
     else
       self.base.mode = getRadicandMode(self.mode)
+    end
+    if self.index then
+      self.index.mode = getSubscriptMode(self.mode)
     end
   end,
   shape = function(self)
@@ -1111,13 +1116,22 @@ elements.radical = pl.class({
       self.radicalShift = 0
     end
 
-    self.base.relX = self.stretchyRadical[1].width
+    if self.index then
+      local radicalAdvance = self.stretchyRadical[1].height + self.stretchyRadical[1].depth
+      self.index.relX = constants.radicalKernBeforeDegree * scaleDown
+      self.index.relY = -radicalAdvance * constants.radicalDegreeBottomRaisePercent
+        + self.stretchyRadical[1].depth
+        - self.radicalShift
+      self.radicalKern = self.index.relX + self.index.width + constants.radicalKernAfterDegree * scaleDown
+    end
+
+    self.base.relX = self.stretchyRadical[1].width + (self.radicalKern or 0)
     self.base.relY = SILE.length(0)
     self.width = self.base.relX + self.base.width
   end,
   output = function(self, x, y, line)
     SILE.outputter:setCursor(
-      scaleWidth(x, line),
+      scaleWidth(x, line) + (self.radicalKern or 0),
       y.length - self.radicalShift)
     SILE.outputter:setFont(self.options)
     SILE.outputter:drawHbox(self.radicalSymbol, self.stretchyRadical[1].width)

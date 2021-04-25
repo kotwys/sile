@@ -74,6 +74,10 @@ function ConvertMathML(content)
     local children = convertChildren(content)
     if #children ~= 1 then SU.error('Wrong number of children in msqrt: ' .. #children) end
     return b.radical(children[1])
+  elseif content.command == 'mroot' then
+    local children = convertChildren(content)
+    if #children ~= 2 then SU.error('Wrong number of children in mroot: ' .. #children) end
+    return b.radical(children[1], children[2])
   elseif content.command == "mtable" or content.command == "table" then
     local children = convertChildren(content)
     return b.table(children, content.options)
